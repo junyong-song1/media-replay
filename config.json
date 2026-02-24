@@ -1,23 +1,42 @@
 {
-  "input": "input.mp4",
+  "input": "input_2audio.mp4",
   "loop": true,
   "max_restarts": 5,
+
+  "stream_types": {
+    "type1": {
+      "description": "PGM(한국어) + IS(현장음)",
+      "maps": ["0:v", "0:a:0", "0:a:1"],
+      "mpegts_start_pid": 35
+    },
+    "type2": {
+      "description": "PGM(한국어)",
+      "maps": ["0:v", "0:a:0"],
+      "mpegts_start_pid": 35
+    },
+    "type3": {
+      "description": "IS(현장음)",
+      "maps": ["0:v", "0:a:1"],
+      "mpegts_start_pid": 36
+    }
+  },
+
   "endpoints": [
-    { "name": "mc-01", "host": "1.2.3.4", "port": 5001, "srt_mode": "caller", "video_pid": 256, "audio_pid": 257, "pmt_pid": 4096 },
-    { "name": "mc-02", "host": "1.2.3.4", "port": 5002, "srt_mode": "caller", "video_pid": 272, "audio_pid": 273, "pmt_pid": 4097 },
-    { "name": "mc-03", "host": "1.2.3.4", "port": 5003, "srt_mode": "caller", "video_pid": 288, "audio_pid": 289, "pmt_pid": 4098 },
-    { "name": "mc-04", "host": "1.2.3.4", "port": 5004, "srt_mode": "caller", "video_pid": 304, "audio_pid": 305, "pmt_pid": 4099 },
-    { "name": "mc-05", "host": "1.2.3.4", "port": 5005, "srt_mode": "caller", "video_pid": 320, "audio_pid": 321, "pmt_pid": 4100 },
-    { "name": "mc-06", "host": "1.2.3.4", "port": 5006, "srt_mode": "caller", "video_pid": 336, "audio_pid": 337, "pmt_pid": 4101 },
-    { "name": "mc-07", "host": "1.2.3.4", "port": 5007, "srt_mode": "caller", "video_pid": 352, "audio_pid": 353, "pmt_pid": 4102 },
-    { "name": "mc-08", "host": "1.2.3.4", "port": 5008, "srt_mode": "caller", "video_pid": 368, "audio_pid": 369, "pmt_pid": 4103 },
-    { "name": "mc-09", "host": "1.2.3.4", "port": 5009, "srt_mode": "caller", "video_pid": 384, "audio_pid": 385, "pmt_pid": 4104 },
-    { "name": "mc-10", "host": "1.2.3.4", "port": 5010, "srt_mode": "caller", "video_pid": 400, "audio_pid": 401, "pmt_pid": 4105 },
-    { "name": "mc-11", "host": "1.2.3.4", "port": 5011, "srt_mode": "caller", "video_pid": 416, "audio_pid": 417, "pmt_pid": 4106 },
-    { "name": "mc-12", "host": "1.2.3.4", "port": 5012, "srt_mode": "caller", "video_pid": 432, "audio_pid": 433, "pmt_pid": 4107 },
-    { "name": "mc-13", "host": "1.2.3.4", "port": 5013, "srt_mode": "caller", "video_pid": 448, "audio_pid": 449, "pmt_pid": 4108 },
-    { "name": "mc-14", "host": "1.2.3.4", "port": 5014, "srt_mode": "caller", "video_pid": 464, "audio_pid": 465, "pmt_pid": 4109 },
-    { "name": "mc-15", "host": "1.2.3.4", "port": 5015, "srt_mode": "caller", "video_pid": 480, "audio_pid": 481, "pmt_pid": 4110 },
-    { "name": "mc-16", "host": "1.2.3.4", "port": 5016, "srt_mode": "caller", "video_pid": 496, "audio_pid": 497, "pmt_pid": 4111 }
+    { "name": "mc-01", "host": "1.2.3.4", "port": 5001, "type": "type1" },
+    { "name": "mc-02", "host": "1.2.3.4", "port": 5002, "type": "type1" },
+    { "name": "mc-03", "host": "1.2.3.4", "port": 5003, "type": "type2" },
+    { "name": "mc-04", "host": "1.2.3.4", "port": 5004, "type": "type2" },
+    { "name": "mc-05", "host": "1.2.3.4", "port": 5005, "type": "type2" },
+    { "name": "mc-06", "host": "1.2.3.4", "port": 5006, "type": "type2" },
+    { "name": "mc-07", "host": "1.2.3.4", "port": 5007, "type": "type2" },
+    { "name": "mc-08", "host": "1.2.3.4", "port": 5008, "type": "type2" },
+    { "name": "mc-09", "host": "1.2.3.4", "port": 5009, "type": "type2" },
+    { "name": "mc-10", "host": "1.2.3.4", "port": 5010, "type": "type2" },
+    { "name": "mc-11", "host": "1.2.3.4", "port": 5011, "type": "type3" },
+    { "name": "mc-12", "host": "1.2.3.4", "port": 5012, "type": "type3" },
+    { "name": "mc-13", "host": "1.2.3.4", "port": 5013, "type": "type3" },
+    { "name": "mc-14", "host": "1.2.3.4", "port": 5014, "type": "type3" },
+    { "name": "mc-15", "host": "1.2.3.4", "port": 5015, "type": "type3" },
+    { "name": "mc-16", "host": "1.2.3.4", "port": 5016, "type": "type3" }
   ]
 }

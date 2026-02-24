@@ -70,7 +70,6 @@ class Worker:
         while True:
             await self._start()
             assert self._proc is not None
-            # stderr 로깅 태스크를 함께 실행
             stderr_task = asyncio.create_task(self._stream_stderr())
             self._last_exit_code = await self._proc.wait()
             stderr_task.cancel()
@@ -147,20 +146,26 @@ class RelayManager:
     """모든 Worker를 관리하고, 시그널 처리와 모니터 루프를 담당한다."""
 
     def __init__(self, input_file: str, loop: bool, max_restarts: int,
-                 endpoints: list[dict]):
+                 stream_types: dict, endpoints: list[dict]):
         self._workers: list[Worker] = []
         for ep in endpoints:
             name = ep.get("name", f"{ep['host']}:{ep['port']}")
-            cmd = self._build_cmd(input_file, loop, ep)
+            st = stream_types[ep["type"]]
+            cmd = self._build_cmd(input_file, loop, ep, st)
             self._workers.append(Worker(name=name, cmd=cmd, max_restarts=max_restarts))
+            log.info("[%s] type=%s (%s)", name, ep["type"], st["description"])
 
     @staticmethod
-    def _build_cmd(input_file: str, loop: bool, ep: dict) -> list[str]:
+    def _build_cmd(input_file: str, loop: bool, ep: dict, st: dict) -> list[str]:
         cmd = ["ffmpeg", "-hide_banner", "-re"]
         if loop:
             cmd += ["-stream_loop", "-1"]
-        cmd += ["-i", input_file, "-c", "copy", "-f", "mpegts"]
-        cmd += ["-mpegts_start_pid", str(ep["video_pid"])]
+        cmd += ["-i", input_file]
+        # stream mapping
+        for m in st["maps"]:
+            cmd += ["-map", m]
+        cmd += ["-c", "copy", "-f", "mpegts"]
+        cmd += ["-mpegts_start_pid", str(st["mpegts_start_pid"])]
         if "pmt_pid" in ep:
             cmd += ["-mpegts_pmt_start_pid", str(ep["pmt_pid"])]
         srt_mode = ep.get("srt_mode", "caller")
@@ -172,8 +177,6 @@ class RelayManager:
         loop = asyncio.get_running_loop()
         stop_event = asyncio.Event()
 
-        for sig in (asyncio.subprocess.PIPE,):  # dummy — replaced below
-            pass
         for sig_name in ("SIGINT", "SIGTERM"):
             loop.add_signal_handler(
                 getattr(__import__("signal"), sig_name),
@@ -182,26 +185,20 @@ class RelayManager:
 
         log.info("Starting %d workers …", len(self._workers))
 
-        # 각 워커를 독립 태스크로 실행
         tasks = [asyncio.create_task(w.run()) for w in self._workers]
-
-        # 주기적 상태 출력 + 종료 대기
         status_task = asyncio.create_task(self._status_loop(stop_event))
 
-        # shutdown 신호 또는 모든 워커가 DEAD가 될 때까지 대기
         done, _ = await asyncio.wait(
-            [asyncio.create_task(stop_event.wait()), asyncio.gather(*tasks, return_exceptions=True)],
+            [asyncio.create_task(stop_event.wait()),
+             asyncio.gather(*tasks, return_exceptions=True)],
             return_when=asyncio.FIRST_COMPLETED,
         )
 
-        # 정리
         status_task.cancel()
         for t in tasks:
             t.cancel()
-        # cancel 후 모든 태스크가 완료될 때까지 대기
         await asyncio.gather(*tasks, status_task, return_exceptions=True)
 
-        # 아직 살아있는 FFmpeg 프로세스 정리
         log.info("Stopping remaining processes …")
         await asyncio.gather(*(w.stop() for w in self._workers))
 
@@ -256,10 +253,23 @@ def main():
         log.error("Input file not found: %s", input_file)
         sys.exit(1)
 
+    stream_types = config.get("stream_types", {})
+    if not stream_types:
+        log.error("No stream_types defined in config")
+        sys.exit(1)
+
     endpoints = config.get("endpoints", [])
     if not endpoints:
         log.error("No endpoints defined in config")
         sys.exit(1)
+
+    # validate endpoint types
+    for ep in endpoints:
+        if ep.get("type") not in stream_types:
+            log.error("[%s] Unknown type '%s' — available: %s",
+                      ep.get("name", "?"), ep.get("type"),
+                      ", ".join(stream_types.keys()))
+            sys.exit(1)
 
     loop = config.get("loop", True)
     max_restarts = config.get("max_restarts", 5)
@@ -267,7 +277,7 @@ def main():
     log.info("Input: %s | Loop: %s | Endpoints: %d | Max restarts: %d",
              input_file, loop, len(endpoints), max_restarts)
 
-    manager = RelayManager(input_file, loop, max_restarts, endpoints)
+    manager = RelayManager(input_file, loop, max_restarts, stream_types, endpoints)
     asyncio.run(manager.run())
 
 
