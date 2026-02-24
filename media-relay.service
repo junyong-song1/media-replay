@@ -1,0 +1,19 @@
+[Unit]
+Description=Media Relay - FFmpeg SRT Multi-Endpoint Sender
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=media-relay
+Group=media-relay
+WorkingDirectory=/opt/media-relay
+ExecStart=/usr/bin/python3 /opt/media-relay/relay.py -c /opt/media-relay/config.json
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=media-relay
+
+[Install]
+WantedBy=multi-user.target

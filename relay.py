@@ -5,17 +5,55 @@ import argparse
 import asyncio
 import json
 import logging
+import logging.handlers
 import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+from aiohttp import web
+
 log = logging.getLogger("media-relay")
+
+
+# ---------------------------------------------------------------------------
+# Logging setup
+# ---------------------------------------------------------------------------
+
+def setup_logging(config: dict) -> None:
+    """콘솔 + 선택적 TimedRotatingFileHandler(일별) 로깅을 구성한다."""
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+
+    fmt = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    # console handler
+    console = logging.StreamHandler()
+    console.setLevel(logging.INFO)
+    console.setFormatter(fmt)
+    root.addHandler(console)
+
+    # optional file handler (daily rotation)
+    log_file = config.get("log_file")
+    if log_file:
+        log_path = Path(log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        backup_count = config.get("log_backup_count", 30)
+        fh = logging.handlers.TimedRotatingFileHandler(
+            log_file,
+            when="midnight",
+            interval=1,
+            backupCount=backup_count,
+        )
+        fh.suffix = "%Y-%m-%d"
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(fmt)
+        root.addHandler(fh)
+        log.info("File logging enabled: %s (daily rotation, keep %d days)",
+                 log_file, backup_count)
 
 
 # ---------------------------------------------------------------------------
@@ -44,6 +82,7 @@ class Worker:
     _restarts: int = 0
     _started_at: float = 0.0
     _last_exit_code: int | None = None
+    _stats: dict = field(default_factory=dict)
 
     @property
     def state(self) -> WorkerState:
@@ -64,6 +103,10 @@ class Worker:
             return loop.time() - self._started_at
         return 0.0
 
+    @property
+    def stats(self) -> dict:
+        return dict(self._stats)
+
     async def run(self) -> None:
         """워커의 전체 수명주기: 시작 → 감시 → 재시작을 반복한다.
         CancelledError로 외부에서 중단할 수 있다."""
@@ -71,8 +114,11 @@ class Worker:
             await self._start()
             assert self._proc is not None
             stderr_task = asyncio.create_task(self._stream_stderr())
+            stdout_task = asyncio.create_task(self._stream_stdout())
             self._last_exit_code = await self._proc.wait()
             stderr_task.cancel()
+            stdout_task.cancel()
+            await asyncio.gather(stderr_task, stdout_task, return_exceptions=True)
             self._state = WorkerState.IDLE
             log.warning("[%s] Exited with code %d (uptime %.1fs)",
                         self.name, self._last_exit_code, self.uptime)
@@ -107,9 +153,10 @@ class Worker:
 
     async def _start(self) -> None:
         log.info("[%s] Starting: %s", self.name, " ".join(self.cmd))
+        self._stats.clear()
         self._proc = await asyncio.create_subprocess_exec(
             *self.cmd,
-            stdout=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         self._started_at = asyncio.get_event_loop().time()
@@ -126,16 +173,129 @@ class Worker:
         except asyncio.CancelledError:
             return
 
+    async def _stream_stdout(self) -> None:
+        """FFmpeg -progress pipe:1 출력을 파싱하여 통계를 수집한다."""
+        assert self._proc is not None and self._proc.stdout is not None
+        try:
+            async for raw_line in self._proc.stdout:
+                line = raw_line.decode(errors="replace").rstrip()
+                if "=" in line:
+                    key, _, value = line.partition("=")
+                    self._stats[key.strip()] = value.strip()
+        except asyncio.CancelledError:
+            return
+
     def status_line(self) -> str:
         parts = [f"{self.name}: {self._state.value}"]
         if self._state == WorkerState.RUNNING:
             parts.append(f"pid={self.pid}")
             parts.append(f"uptime={self.uptime:.0f}s")
+            if self._stats.get("bitrate"):
+                parts.append(f"bitrate={self._stats['bitrate']}")
+            if self._stats.get("speed"):
+                parts.append(f"speed={self._stats['speed']}")
         if self._restarts:
             parts.append(f"restarts={self._restarts}/{self.max_restarts}")
         if self._last_exit_code is not None:
             parts.append(f"last_exit={self._last_exit_code}")
         return " | ".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# HTTP Status API
+# ---------------------------------------------------------------------------
+
+class StatusAPI:
+    """aiohttp 기반 경량 HTTP 상태 API."""
+
+    def __init__(self, workers: list[Worker], worker_tasks: dict | None = None,
+                 port: int = 8080):
+        self._workers = workers
+        self._worker_tasks: dict[str, asyncio.Task] = worker_tasks or {}
+        self._port = port
+        self._app = web.Application()
+        self._app.router.add_get("/health", self._health)
+        self._app.router.add_get("/status", self._status)
+        self._app.router.add_post("/workers/{name}/restart", self._restart_worker)
+        self._app.router.add_post("/workers/restart-all", self._restart_all)
+        self._runner: web.AppRunner | None = None
+
+    async def start(self) -> None:
+        self._runner = web.AppRunner(self._app)
+        await self._runner.setup()
+        site = web.TCPSite(self._runner, "0.0.0.0", self._port)
+        await site.start()
+        log.info("Status API listening on port %d", self._port)
+
+    async def stop(self) -> None:
+        if self._runner:
+            await self._runner.cleanup()
+            log.info("Status API stopped")
+
+    async def _health(self, request: web.Request) -> web.Response:
+        running = sum(1 for w in self._workers
+                      if w.state == WorkerState.RUNNING)
+        total = len(self._workers)
+        healthy = running > 0
+        body = {
+            "healthy": healthy,
+            "running": running,
+            "total": total,
+        }
+        status_code = 200 if healthy else 503
+        return web.json_response(body, status=status_code)
+
+    async def _status(self, request: web.Request) -> web.Response:
+        workers = []
+        for w in self._workers:
+            workers.append({
+                "name": w.name,
+                "state": w.state.value,
+                "pid": w.pid,
+                "uptime": round(w.uptime, 1),
+                "restarts": w.restarts,
+                "stats": w.stats,
+            })
+        return web.json_response({"workers": workers})
+
+    async def _restart_worker(self, request: web.Request) -> web.Response:
+        name = request.match_info["name"]
+        worker = next((w for w in self._workers if w.name == name), None)
+        if not worker:
+            return web.json_response({"error": f"Worker '{name}' not found"},
+                                     status=404)
+        log.info("[API] Restart requested for %s", name)
+        await worker.stop()
+        # cancel old task and start new one
+        old_task = self._worker_tasks.get(name)
+        if old_task:
+            old_task.cancel()
+            try:
+                await old_task
+            except asyncio.CancelledError:
+                pass
+        worker._restarts = 0
+        worker._state = WorkerState.IDLE
+        self._worker_tasks[name] = asyncio.create_task(worker.run())
+        return web.json_response({"ok": True, "restarted": name})
+
+    async def _restart_all(self, request: web.Request) -> web.Response:
+        log.info("[API] Restart-all requested")
+        restarted = []
+        for w in self._workers:
+            await w.stop()
+            old_task = self._worker_tasks.get(w.name)
+            if old_task:
+                old_task.cancel()
+                try:
+                    await old_task
+                except asyncio.CancelledError:
+                    pass
+            w._restarts = 0
+            w._state = WorkerState.IDLE
+            self._worker_tasks[w.name] = asyncio.create_task(w.run())
+            restarted.append(w.name)
+        return web.json_response({"ok": True, "restarted": restarted})
 
 
 # ---------------------------------------------------------------------------
@@ -146,8 +306,10 @@ class RelayManager:
     """모든 Worker를 관리하고, 시그널 처리와 모니터 루프를 담당한다."""
 
     def __init__(self, input_file: str, loop: bool, max_restarts: int,
-                 stream_types: dict, endpoints: list[dict]):
+                 stream_types: dict, endpoints: list[dict],
+                 api_port: int = 8080):
         self._workers: list[Worker] = []
+        self._api_port = api_port
         for ep in endpoints:
             name = ep.get("name", f"{ep['host']}:{ep['port']}")
             st = stream_types[ep["type"]]
@@ -157,10 +319,11 @@ class RelayManager:
 
     @staticmethod
     def _build_cmd(input_file: str, loop: bool, ep: dict, st: dict) -> list[str]:
-        cmd = ["ffmpeg", "-hide_banner", "-re"]
+        cmd = ["ffmpeg", "-hide_banner", "-nostats", "-re"]
         if loop:
             cmd += ["-stream_loop", "-1"]
         cmd += ["-i", input_file]
+        cmd += ["-progress", "pipe:1"]
         # stream mapping
         for m in st["maps"]:
             cmd += ["-map", m]
@@ -185,22 +348,31 @@ class RelayManager:
 
         log.info("Starting %d workers …", len(self._workers))
 
-        tasks = [asyncio.create_task(w.run()) for w in self._workers]
+        worker_tasks: dict[str, asyncio.Task] = {}
+        for w in self._workers:
+            worker_tasks[w.name] = asyncio.create_task(w.run())
+
+        # Start HTTP Status API
+        api = StatusAPI(self._workers, worker_tasks=worker_tasks, port=self._api_port)
+        await api.start()
+
         status_task = asyncio.create_task(self._status_loop(stop_event))
 
         done, _ = await asyncio.wait(
             [asyncio.create_task(stop_event.wait()),
-             asyncio.gather(*tasks, return_exceptions=True)],
+             asyncio.gather(*worker_tasks.values(), return_exceptions=True)],
             return_when=asyncio.FIRST_COMPLETED,
         )
 
         status_task.cancel()
-        for t in tasks:
+        for t in worker_tasks.values():
             t.cancel()
-        await asyncio.gather(*tasks, status_task, return_exceptions=True)
+        await asyncio.gather(*worker_tasks.values(), status_task, return_exceptions=True)
 
         log.info("Stopping remaining processes …")
         await asyncio.gather(*(w.stop() for w in self._workers))
+
+        await api.stop()
 
         self._print_summary()
         log.info("Goodbye.")
@@ -243,10 +415,13 @@ def main():
 
     config_path = Path(args.config)
     if not config_path.is_file():
-        log.error("Config file not found: %s", config_path)
+        print(f"Config file not found: {config_path}", file=sys.stderr)
         sys.exit(1)
 
     config = load_config(str(config_path))
+
+    # Setup logging (must come after config load)
+    setup_logging(config)
 
     input_file = args.input or config.get("input", "input.mp4")
     if not Path(input_file).is_file():
@@ -273,11 +448,13 @@ def main():
 
     loop = config.get("loop", True)
     max_restarts = config.get("max_restarts", 5)
+    api_port = config.get("api_port", 8080)
 
-    log.info("Input: %s | Loop: %s | Endpoints: %d | Max restarts: %d",
-             input_file, loop, len(endpoints), max_restarts)
+    log.info("Input: %s | Loop: %s | Endpoints: %d | Max restarts: %d | API port: %d",
+             input_file, loop, len(endpoints), max_restarts, api_port)
 
-    manager = RelayManager(input_file, loop, max_restarts, stream_types, endpoints)
+    manager = RelayManager(input_file, loop, max_restarts, stream_types, endpoints,
+                           api_port=api_port)
     asyncio.run(manager.run())
 
 
