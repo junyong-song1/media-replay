@@ -73,6 +73,7 @@ class Worker:
 
     name: str
     cmd: list[str]
+    stream_type: str = ""
     max_restarts: int = 5
     backoff_base: float = 2.0
     backoff_max: float = 30.0
@@ -216,8 +217,13 @@ class StatusAPI:
         self._app = web.Application()
         self._app.router.add_get("/health", self._health)
         self._app.router.add_get("/status", self._status)
+        self._app.router.add_post("/workers/{name}/stop", self._stop_worker)
+        self._app.router.add_post("/workers/{name}/start", self._start_worker)
         self._app.router.add_post("/workers/{name}/restart", self._restart_worker)
         self._app.router.add_post("/workers/restart-all", self._restart_all)
+        self._app.router.add_post("/workers/type/{stype}/stop", self._stop_type)
+        self._app.router.add_post("/workers/type/{stype}/start", self._start_type)
+        self._app.router.add_post("/workers/type/{stype}/restart", self._restart_type)
         self._runner: web.AppRunner | None = None
 
     async def start(self) -> None:
@@ -250,6 +256,7 @@ class StatusAPI:
         for w in self._workers:
             workers.append({
                 "name": w.name,
+                "type": w.stream_type,
                 "state": w.state.value,
                 "pid": w.pid,
                 "uptime": round(w.uptime, 1),
@@ -257,6 +264,42 @@ class StatusAPI:
                 "stats": w.stats,
             })
         return web.json_response({"workers": workers})
+
+    async def _stop_worker(self, request: web.Request) -> web.Response:
+        name = request.match_info["name"]
+        worker = next((w for w in self._workers if w.name == name), None)
+        if not worker:
+            return web.json_response({"error": f"Worker '{name}' not found"},
+                                     status=404)
+        if worker.state not in (WorkerState.RUNNING, WorkerState.BACKOFF):
+            return web.json_response({"error": f"Worker '{name}' is not running",
+                                      "state": worker.state.value}, status=400)
+        log.info("[API] Stop requested for %s", name)
+        old_task = self._worker_tasks.get(name)
+        if old_task:
+            old_task.cancel()
+            try:
+                await old_task
+            except asyncio.CancelledError:
+                pass
+        await worker.stop()
+        worker._state = WorkerState.IDLE
+        return web.json_response({"ok": True, "stopped": name})
+
+    async def _start_worker(self, request: web.Request) -> web.Response:
+        name = request.match_info["name"]
+        worker = next((w for w in self._workers if w.name == name), None)
+        if not worker:
+            return web.json_response({"error": f"Worker '{name}' not found"},
+                                     status=404)
+        if worker.state == WorkerState.RUNNING:
+            return web.json_response({"error": f"Worker '{name}' is already running"},
+                                     status=400)
+        log.info("[API] Start requested for %s", name)
+        worker._restarts = 0
+        worker._state = WorkerState.IDLE
+        self._worker_tasks[name] = asyncio.create_task(worker.run())
+        return web.json_response({"ok": True, "started": name})
 
     async def _restart_worker(self, request: web.Request) -> web.Response:
         name = request.match_info["name"]
@@ -297,6 +340,72 @@ class StatusAPI:
             restarted.append(w.name)
         return web.json_response({"ok": True, "restarted": restarted})
 
+    def _get_workers_by_type(self, stype: str) -> list[Worker]:
+        return [w for w in self._workers if w.stream_type == stype]
+
+    async def _stop_type(self, request: web.Request) -> web.Response:
+        stype = request.match_info["stype"]
+        workers = self._get_workers_by_type(stype)
+        if not workers:
+            return web.json_response({"error": f"No workers with type '{stype}'"},
+                                     status=404)
+        log.info("[API] Stop requested for type=%s (%d workers)", stype, len(workers))
+        stopped = []
+        for w in workers:
+            if w.state not in (WorkerState.RUNNING, WorkerState.BACKOFF):
+                continue
+            old_task = self._worker_tasks.get(w.name)
+            if old_task:
+                old_task.cancel()
+                try:
+                    await old_task
+                except asyncio.CancelledError:
+                    pass
+            await w.stop()
+            w._state = WorkerState.IDLE
+            stopped.append(w.name)
+        return web.json_response({"ok": True, "stopped": stopped})
+
+    async def _start_type(self, request: web.Request) -> web.Response:
+        stype = request.match_info["stype"]
+        workers = self._get_workers_by_type(stype)
+        if not workers:
+            return web.json_response({"error": f"No workers with type '{stype}'"},
+                                     status=404)
+        log.info("[API] Start requested for type=%s (%d workers)", stype, len(workers))
+        started = []
+        for w in workers:
+            if w.state == WorkerState.RUNNING:
+                continue
+            w._restarts = 0
+            w._state = WorkerState.IDLE
+            self._worker_tasks[w.name] = asyncio.create_task(w.run())
+            started.append(w.name)
+        return web.json_response({"ok": True, "started": started})
+
+    async def _restart_type(self, request: web.Request) -> web.Response:
+        stype = request.match_info["stype"]
+        workers = self._get_workers_by_type(stype)
+        if not workers:
+            return web.json_response({"error": f"No workers with type '{stype}'"},
+                                     status=404)
+        log.info("[API] Restart requested for type=%s (%d workers)", stype, len(workers))
+        restarted = []
+        for w in workers:
+            await w.stop()
+            old_task = self._worker_tasks.get(w.name)
+            if old_task:
+                old_task.cancel()
+                try:
+                    await old_task
+                except asyncio.CancelledError:
+                    pass
+            w._restarts = 0
+            w._state = WorkerState.IDLE
+            self._worker_tasks[w.name] = asyncio.create_task(w.run())
+            restarted.append(w.name)
+        return web.json_response({"ok": True, "restarted": restarted})
+
 
 # ---------------------------------------------------------------------------
 # RelayManager
@@ -314,7 +423,8 @@ class RelayManager:
             name = ep.get("name", f"{ep['host']}:{ep['port']}")
             st = stream_types[ep["type"]]
             cmd = self._build_cmd(input_file, loop, ep, st)
-            self._workers.append(Worker(name=name, cmd=cmd, max_restarts=max_restarts))
+            self._workers.append(Worker(name=name, cmd=cmd, stream_type=ep["type"],
+                                          max_restarts=max_restarts))
             log.info("[%s] type=%s (%s)", name, ep["type"], st["description"])
 
     @staticmethod

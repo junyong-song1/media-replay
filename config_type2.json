@@ -1,0 +1,27 @@
+{
+  "input": "input_2audio.mp4",
+  "loop": true,
+  "max_restarts": 5,
+  "api_port": 8080,
+  "log_file": "/home/ubuntu/media-relay/logs/relay.log",
+  "log_backup_count": 30,
+
+  "stream_types": {
+    "type2": {
+      "description": "PGM(한국어)",
+      "maps": ["0:v", "0:a:0"],
+      "mpegts_start_pid": 35
+    }
+  },
+
+  "endpoints": [
+    { "name": "mc-03", "host": "3.38.85.1", "port": 8211, "type": "type2" },
+    { "name": "mc-04", "host": "3.39.157.6", "port": 8212, "type": "type2" },
+    { "name": "mc-05", "host": "3.36.203.141", "port": 8221, "type": "type2" },
+    { "name": "mc-06", "host": "52.78.28.120", "port": 8222, "type": "type2" },
+    { "name": "mc-07", "host": "54.180.174.207", "port": 8231, "type": "type2" },
+    { "name": "mc-08", "host": "54.180.64.204", "port": 8232, "type": "type2" },
+    { "name": "mc-09", "host": "3.35.45.108", "port": 8241, "type": "type2" },
+    { "name": "mc-10", "host": "3.35.99.80", "port": 8242, "type": "type2" }
+  ]
+}

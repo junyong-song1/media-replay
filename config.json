@@ -3,7 +3,7 @@
   "loop": true,
   "max_restarts": 5,
   "api_port": 8080,
-  "log_file": "/var/log/media-relay/relay.log",
+  "log_file": "/home/ubuntu/media-relay/logs/relay.log",
   "log_backup_count": 30,
 
   "stream_types": {

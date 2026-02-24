@@ -1,0 +1,21 @@
+{
+  "input": "input_2audio.mp4",
+  "loop": true,
+  "max_restarts": 5,
+  "api_port": 8080,
+  "log_file": "/home/ubuntu/media-relay/logs/relay.log",
+  "log_backup_count": 30,
+
+  "stream_types": {
+    "type1": {
+      "description": "PGM(한국어) + IS(현장음)",
+      "maps": ["0:v", "0:a:0", "0:a:1"],
+      "mpegts_start_pid": 35
+    }
+  },
+
+  "endpoints": [
+    { "name": "mc-01", "host": "3.37.78.142", "port": 8111, "type": "type1" },
+    { "name": "mc-02", "host": "54.116.6.123", "port": 8112, "type": "type1" }
+  ]
+}
