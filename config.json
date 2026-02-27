@@ -25,21 +25,21 @@
   },
 
   "endpoints": [
-    { "name": "mc-01", "host": "3.37.78.142", "port": 8111, "type": "type1" },
-    { "name": "mc-02", "host": "54.116.6.123", "port": 8112, "type": "type1" },
-    { "name": "mc-03", "host": "3.38.85.1", "port": 8211, "type": "type2" },
-    { "name": "mc-04", "host": "3.39.157.6", "port": 8212, "type": "type2" },
-    { "name": "mc-05", "host": "3.36.203.141", "port": 8221, "type": "type2" },
-    { "name": "mc-06", "host": "52.78.28.120", "port": 8222, "type": "type2" },
-    { "name": "mc-07", "host": "54.180.174.207", "port": 8231, "type": "type2" },
-    { "name": "mc-08", "host": "54.180.64.204", "port": 8232, "type": "type2" },
-    { "name": "mc-09", "host": "3.35.45.108", "port": 8241, "type": "type2" },
-    { "name": "mc-10", "host": "3.35.99.80", "port": 8242, "type": "type2" },
-    { "name": "mc-11", "host": "15.165.111.29", "port": 8311, "type": "type3" },
-    { "name": "mc-12", "host": "52.79.232.145", "port": 8312, "type": "type3" },
-    { "name": "mc-13", "host": "13.124.161.44", "port": 8321, "type": "type3" },
-    { "name": "mc-14", "host": "15.165.107.145", "port": 8322, "type": "type3" },
-    { "name": "mc-15", "host": "43.202.224.240", "port": 8331, "type": "type3" },
-    { "name": "mc-16", "host": "43.200.195.100", "port": 8332, "type": "type3" }
+    { "name": "mc-01", "host": "3.37.78.142", "port": 8111, "type": "type1", "pair": "conn-1" },
+    { "name": "mc-02", "host": "54.116.6.123", "port": 8112, "type": "type1", "pair": "conn-1" },
+    { "name": "mc-03", "host": "3.38.85.1", "port": 8211, "type": "type2", "pair": "conn-2" },
+    { "name": "mc-04", "host": "3.39.157.6", "port": 8212, "type": "type2", "pair": "conn-2" },
+    { "name": "mc-05", "host": "3.36.203.141", "port": 8221, "type": "type2", "pair": "conn-3" },
+    { "name": "mc-06", "host": "52.78.28.120", "port": 8222, "type": "type2", "pair": "conn-3" },
+    { "name": "mc-07", "host": "54.180.174.207", "port": 8231, "type": "type2", "pair": "conn-4" },
+    { "name": "mc-08", "host": "54.180.64.204", "port": 8232, "type": "type2", "pair": "conn-4" },
+    { "name": "mc-09", "host": "3.35.45.108", "port": 8241, "type": "type2", "pair": "conn-5" },
+    { "name": "mc-10", "host": "3.35.99.80", "port": 8242, "type": "type2", "pair": "conn-5" },
+    { "name": "mc-11", "host": "15.165.111.29", "port": 8311, "type": "type3", "pair": "conn-6" },
+    { "name": "mc-12", "host": "52.79.232.145", "port": 8312, "type": "type3", "pair": "conn-6" },
+    { "name": "mc-13", "host": "13.124.161.44", "port": 8321, "type": "type3", "pair": "conn-7" },
+    { "name": "mc-14", "host": "15.165.107.145", "port": 8322, "type": "type3", "pair": "conn-7" },
+    { "name": "mc-15", "host": "43.202.224.240", "port": 8331, "type": "type3", "pair": "conn-8" },
+    { "name": "mc-16", "host": "43.200.195.100", "port": 8332, "type": "type3", "pair": "conn-8" }
   ]
 }

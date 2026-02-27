@@ -15,7 +15,7 @@
   },
 
   "endpoints": [
-    { "name": "mc-01", "host": "3.37.78.142", "port": 8111, "type": "type1" },
-    { "name": "mc-02", "host": "54.116.6.123", "port": 8112, "type": "type1" }
+    { "name": "mc-01", "host": "3.37.78.142", "port": 8111, "type": "type1", "pair": "conn-1" },
+    { "name": "mc-02", "host": "54.116.6.123", "port": 8112, "type": "type1", "pair": "conn-1" }
   ]
 }
