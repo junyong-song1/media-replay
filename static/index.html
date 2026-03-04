@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Media Relay Dashboard</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f1117; color: #e0e0e0; padding: 12px; min-height: 100vh; }
+h1 { font-size: 1.3rem; font-weight: 600; }
+
+/* Header */
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
+.header-left { display: flex; align-items: center; gap: 12px; }
+.refresh-btn { background: #2a2d3a; border: 1px solid #3a3d4a; color: #e0e0e0; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+.refresh-btn:active { background: #3a3d4a; }
+.auto-tag { font-size: 0.75rem; color: #888; }
+
+/* Health summary */
+.health { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.health-card { background: #1a1d2a; border-radius: 8px; padding: 12px 18px; flex: 1; min-width: 120px; text-align: center; border: 1px solid #2a2d3a; }
+.health-card .label { font-size: 0.75rem; color: #888; text-transform: uppercase; margin-bottom: 4px; }
+.health-card .value { font-size: 1.8rem; font-weight: 700; }
+.health-card .value.ok { color: #4ade80; }
+.health-card .value.warn { color: #facc15; }
+.health-card .value.err { color: #f87171; }
+
+/* Pair card */
+.pair-card { background: #1a1d2a; border-radius: 10px; padding: 14px; margin-bottom: 12px; border: 1px solid #2a2d3a; }
+.pair-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 6px; }
+.pair-title { font-weight: 600; font-size: 1rem; }
+.pair-meta { font-size: 0.75rem; color: #888; }
+.pair-actions { display: flex; gap: 6px; }
+
+/* Worker row */
+.worker { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 6px; margin-bottom: 4px; background: #12141f; flex-wrap: wrap; }
+.worker:last-child { margin-bottom: 0; }
+.state-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.state-dot.running { background: #4ade80; box-shadow: 0 0 6px #4ade8066; }
+.state-dot.idle { background: #6b7280; }
+.state-dot.backoff { background: #facc15; box-shadow: 0 0 6px #facc1566; }
+.state-dot.dead { background: #f87171; box-shadow: 0 0 6px #f8717166; }
+.worker-name { font-weight: 600; font-size: 0.9rem; min-width: 60px; }
+.worker-state { font-size: 0.75rem; text-transform: uppercase; min-width: 55px; }
+.worker-state.running { color: #4ade80; }
+.worker-state.idle { color: #6b7280; }
+.worker-state.backoff { color: #facc15; }
+.worker-state.dead { color: #f87171; }
+.worker-stats { font-size: 0.75rem; color: #aaa; flex: 1; min-width: 100px; }
+.worker-actions { display: flex; gap: 4px; margin-left: auto; }
+
+/* Buttons */
+.btn { border: none; border-radius: 6px; padding: 6px 12px; font-size: 0.78rem; cursor: pointer; font-weight: 500; min-height: 34px; min-width: 50px; transition: opacity 0.15s; }
+.btn:active { opacity: 0.7; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-start { background: #166534; color: #4ade80; }
+.btn-stop { background: #7f1d1d; color: #f87171; }
+.btn-restart { background: #713f12; color: #facc15; }
+.btn-sm { padding: 4px 8px; font-size: 0.72rem; min-height: 28px; min-width: 40px; }
+
+/* Bottom controls */
+.bottom-controls { background: #1a1d2a; border-radius: 10px; padding: 14px; margin-top: 16px; border: 1px solid #2a2d3a; }
+.control-section { margin-bottom: 12px; }
+.control-section:last-child { margin-bottom: 0; }
+.control-label { font-size: 0.8rem; color: #888; margin-bottom: 6px; font-weight: 500; }
+.control-row { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* Error */
+.error-banner { background: #7f1d1d; color: #fca5a5; padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 0.85rem; display: none; }
+
+/* Loading */
+.loading { text-align: center; padding: 40px; color: #888; }
+
+@media (max-width: 480px) {
+  body { padding: 8px; }
+  .worker { gap: 6px; padding: 6px 8px; }
+  .btn { padding: 6px 10px; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <h1>Media Relay</h1>
+    <span class="auto-tag" id="autoTag">auto-refresh 5s</span>
+  </div>
+  <button class="refresh-btn" onclick="fetchStatus()">Refresh</button>
+</div>
+
+<div class="error-banner" id="errorBanner"></div>
+
+<div class="health" id="healthBar">
+  <div class="health-card"><div class="label">Running</div><div class="value" id="hRunning">-</div></div>
+  <div class="health-card"><div class="label">Total</div><div class="value" id="hTotal">-</div></div>
+  <div class="health-card"><div class="label">Health</div><div class="value" id="hHealth">-</div></div>
+</div>
+
+<div id="pairsContainer"><div class="loading">Loading...</div></div>
+
+<div class="bottom-controls" id="bottomControls" style="display:none">
+  <div id="typeControls"></div>
+  <div class="control-section">
+    <div class="control-label">All Workers</div>
+    <div class="control-row">
+      <button class="btn btn-restart" onclick="apiCall('/workers/restart-all','POST')">Restart All</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API_BASE = '';
+let refreshTimer = null;
+let lastData = null;
+
+function formatUptime(sec) {
+  if (sec <= 0) return '-';
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  if (h > 0) return h + 'h ' + m + 'm';
+  if (m > 0) return m + 'm ' + s + 's';
+  return s + 's';
+}
+
+function showError(msg) {
+  const el = document.getElementById('errorBanner');
+  if (msg) { el.textContent = msg; el.style.display = 'block'; }
+  else { el.style.display = 'none'; }
+}
+
+async function apiCall(path, method) {
+  try {
+    const res = await fetch(API_BASE + path, { method });
+    const data = await res.json();
+    if (!res.ok) { showError(data.error || 'Request failed'); return; }
+    showError(null);
+    // refresh after action
+    setTimeout(fetchStatus, 500);
+  } catch (e) {
+    showError('API error: ' + e.message);
+  }
+}
+
+function renderHealth(workers) {
+  const running = workers.filter(w => w.state === 'running').length;
+  const total = workers.length;
+  const dead = workers.filter(w => w.state === 'dead').length;
+
+  document.getElementById('hRunning').textContent = running;
+  document.getElementById('hRunning').className = 'value ' + (running === total ? 'ok' : running > 0 ? 'warn' : 'err');
+  document.getElementById('hTotal').textContent = total;
+  document.getElementById('hTotal').className = 'value ok';
+
+  const hEl = document.getElementById('hHealth');
+  if (dead > 0) { hEl.textContent = dead + ' DEAD'; hEl.className = 'value err'; }
+  else if (running === total) { hEl.textContent = 'OK'; hEl.className = 'value ok'; }
+  else if (running > 0) { hEl.textContent = 'PARTIAL'; hEl.className = 'value warn'; }
+  else { hEl.textContent = 'DOWN'; hEl.className = 'value err'; }
+}
+
+function renderWorker(w) {
+  const stats = [];
+  if (w.state === 'running') {
+    stats.push(formatUptime(w.uptime));
+    if (w.stats.bitrate) stats.push(w.stats.bitrate);
+    if (w.stats.speed) stats.push('x' + w.stats.speed);
+  }
+  if (w.restarts > 0) stats.push('R:' + w.restarts);
+
+  const isActive = w.state === 'running' || w.state === 'backoff';
+  return `<div class="worker">
+    <span class="state-dot ${w.state}"></span>
+    <span class="worker-name">${w.name}</span>
+    <span class="worker-state ${w.state}">${w.state}</span>
+    <span class="worker-stats">${stats.join(' / ')}</span>
+    <span class="worker-actions">
+      ${isActive
+        ? `<button class="btn btn-stop btn-sm" onclick="apiCall('/workers/${w.name}/stop','POST')">Stop</button>`
+        : `<button class="btn btn-start btn-sm" onclick="apiCall('/workers/${w.name}/start','POST')">Start</button>`
+      }
+      <button class="btn btn-restart btn-sm" onclick="apiCall('/workers/${w.name}/restart','POST')">Restart</button>
+    </span>
+  </div>`;
+}
+
+function renderPairs(workers) {
+  // group by pair
+  const pairs = {};
+  workers.forEach(w => {
+    const key = w.pair || '_no_pair';
+    if (!pairs[key]) pairs[key] = [];
+    pairs[key].push(w);
+  });
+
+  const container = document.getElementById('pairsContainer');
+  let html = '';
+
+  // sort pairs by name
+  const pairKeys = Object.keys(pairs).sort();
+
+  for (const pairName of pairKeys) {
+    const pw = pairs[pairName];
+    const pairType = pw[0].type;
+    const pairDesc = pw[0].description;
+    const displayName = pairName === '_no_pair' ? 'Ungrouped' : pairName;
+
+    html += `<div class="pair-card">
+      <div class="pair-header">
+        <div>
+          <span class="pair-title">${displayName}</span>
+          <span class="pair-meta">${pairType} - ${pairDesc}</span>
+        </div>
+        ${pairName !== '_no_pair' ? `<div class="pair-actions">
+          <button class="btn btn-start btn-sm" onclick="apiCall('/workers/pair/${pairName}/start','POST')">Start</button>
+          <button class="btn btn-stop btn-sm" onclick="apiCall('/workers/pair/${pairName}/stop','POST')">Stop</button>
+          <button class="btn btn-restart btn-sm" onclick="apiCall('/workers/pair/${pairName}/restart','POST')">Restart</button>
+        </div>` : ''}
+      </div>
+      ${pw.map(renderWorker).join('')}
+    </div>`;
+  }
+
+  container.innerHTML = html;
+}
+
+function renderTypeControls(workers) {
+  const types = [...new Set(workers.map(w => w.type))].sort();
+  const container = document.getElementById('typeControls');
+  let html = '';
+  for (const t of types) {
+    const desc = workers.find(w => w.type === t)?.description || '';
+    html += `<div class="control-section">
+      <div class="control-label">${t} - ${desc}</div>
+      <div class="control-row">
+        <button class="btn btn-start" onclick="apiCall('/workers/type/${t}/start','POST')">Start</button>
+        <button class="btn btn-stop" onclick="apiCall('/workers/type/${t}/stop','POST')">Stop</button>
+        <button class="btn btn-restart" onclick="apiCall('/workers/type/${t}/restart','POST')">Restart</button>
+      </div>
+    </div>`;
+  }
+  container.innerHTML = html;
+  document.getElementById('bottomControls').style.display = '';
+}
+
+async function fetchStatus() {
+  try {
+    const res = await fetch(API_BASE + '/status');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    lastData = data;
+    showError(null);
+    renderHealth(data.workers);
+    renderPairs(data.workers);
+    renderTypeControls(data.workers);
+  } catch (e) {
+    showError('Failed to fetch status: ' + e.message);
+  }
+}
+
+function startAutoRefresh() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = setInterval(fetchStatus, 5000);
+}
+
+// init
+fetchStatus();
+startAutoRefresh();
+</script>
+</body>
+</html>

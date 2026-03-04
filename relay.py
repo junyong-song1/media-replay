@@ -77,6 +77,7 @@ class Worker:
     cmd: list[str]
     stream_type: str = ""
     pair: str = ""
+    description: str = ""
     max_restarts: int = 5
     backoff_base: float = 2.0
     backoff_max: float = 30.0
@@ -258,6 +259,7 @@ class StatusAPI:
         self._worker_tasks: dict[str, asyncio.Task] = worker_tasks or {}
         self._port = port
         self._app = web.Application()
+        self._app.router.add_get("/", self._dashboard)
         self._app.router.add_get("/health", self._health)
         self._app.router.add_get("/status", self._status)
         self._app.router.add_post("/workers/{name}/stop", self._stop_worker)
@@ -284,6 +286,12 @@ class StatusAPI:
             await self._runner.cleanup()
             log.info("Status API stopped")
 
+    async def _dashboard(self, request: web.Request) -> web.Response:
+        html_path = Path(__file__).parent / "static" / "index.html"
+        if not html_path.is_file():
+            return web.Response(text="Dashboard not found", status=404)
+        return web.FileResponse(html_path)
+
     async def _health(self, request: web.Request) -> web.Response:
         running = sum(1 for w in self._workers
                       if w.state == WorkerState.RUNNING)
@@ -303,6 +311,8 @@ class StatusAPI:
             workers.append({
                 "name": w.name,
                 "type": w.stream_type,
+                "pair": w.pair,
+                "description": w.description,
                 "state": w.state.value,
                 "pid": w.pid,
                 "uptime": round(w.uptime, 1),
@@ -519,6 +529,7 @@ class RelayManager:
             cmd = self._build_cmd(input_file, loop, ep, st)
             self._workers.append(Worker(name=name, cmd=cmd, stream_type=ep["type"],
                                           pair=ep.get("pair", ""),
+                                          description=st["description"],
                                           max_restarts=max_restarts))
             log.info("[%s] type=%s pair=%s (%s)", name, ep["type"],
                      ep.get("pair", "-"), st["description"])
